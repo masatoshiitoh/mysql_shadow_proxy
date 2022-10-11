@@ -125,7 +125,7 @@ process_request(D) ->
     end.
 
 is_modify_operator(D) ->
-    is_modify_operator(D, ["INSERT", "UPDATE", "DELETE"]).
+    is_modify_operator(D, ["INSERT ", "UPDATE ", "DELETE "]).
 
 is_modify_operator(_D, []) ->
     false;
