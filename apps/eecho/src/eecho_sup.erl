@@ -28,10 +28,16 @@ start_link() ->
 %%                  type => worker(),       % optional
 %%                  modules => modules()}   % optional
 init([]) ->
-    SupFlags = #{strategy => one_for_all,
-                 intensity => 0,
-                 period => 1},
-    ChildSpecs = [?CHILD(listener, worker), ?CHILD(shadow_listener, worker)],
+    SupFlags = #{
+        strategy => one_for_all,
+        intensity => 0,
+        period => 1
+    },
+    ChildSpecs = [
+        ?CHILD(query_cache, worker),
+        ?CHILD(listener, worker),
+        ?CHILD(shadow_listener, worker)
+    ],
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions

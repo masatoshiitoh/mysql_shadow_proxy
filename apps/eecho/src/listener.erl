@@ -108,7 +108,13 @@ loop(CallerSocket, ClientPid) ->
     end.
 
 process_response(D) ->
-    io:format("RESP Payload ~w ~n", [D]),
+    StoreResult = query_cache:store_value(D),
+    case StoreResult of
+        {undefined, _X} ->
+            io:format("RESP Payload ~w ~n", [D]);
+        StoreSucceeded ->
+            io:format("[STORE]RESP Payload ~w ~n", [StoreSucceeded])
+    end,
     D.
 
 process_request(D) ->
@@ -116,7 +122,8 @@ process_request(D) ->
     case is_modify_operator(BodyBin) of
         true ->
             io:format("Header ~w ~n", [HeaderBin]),
-            io:format("MODIFIER! Payload ~s ~n", [BodyBin]),
+            io:format("[STORE]MODIFIER! Payload ~s ~n", [BodyBin]),
+            query_cache:store_key(BodyBin),
             D;
         false ->
             io:format("Header ~w ~n", [HeaderBin]),

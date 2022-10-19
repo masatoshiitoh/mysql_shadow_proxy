@@ -9,7 +9,7 @@
 -export([lookup/1]).
 
 -define(TBLNAME, cache).
--define(PDIC_KEY_NAME, temporary_query_cache_key).
+-define(PDIC_KEY_NAME, tmp_key).
 
 %%
 %% キー（クエリ）が届く：store_keyが呼ばれる
@@ -25,38 +25,45 @@
 %% 保管したキーで検索→バリューを返す
 %% 未保管のキーで検索→undefinedを返す
 
+%% ETS内はすべてlistで保存されている。バイナリは引数でもらったら全部入り口でlist化する
 
 start_link() ->
     ?TBLNAME = ets:new(?TBLNAME, [set, named_table]),
+    io:format("query_cache:start_link called~n", []),
     {ok, self()}.
 
 stop(_) ->
+    io:format("query_cache:stop called~n", []),
     ets:delete(?TBLNAME).
 
-lookup(Query) ->
-    case ets:lookup(?TBLNAME, Query) of
+lookup(BinQuery) when is_binary(BinQuery)->
+    ListedQuery = binary_to_list(BinQuery),
+    case ets:lookup(?TBLNAME, ListedQuery) of
         [] ->
             undefined;
-        [{Query, Value}] ->
-            Value
+        [{ListedQuery, ListedValue}] ->
+            list_to_binary(ListedValue)
     end.
 
-store_key(Query) ->
-    put(?PDIC_KEY_NAME, Query).
+store_key(BinQuery) when is_binary(BinQuery) ->
+    ListedQuery = binary_to_list(BinQuery),
+    put(?PDIC_KEY_NAME, ListedQuery).
 
-store_value(Response) ->
+store_value(BinResponse) when is_binary(BinResponse) ->
+    ListedResponse = binary_to_list(BinResponse),
+    %% process dictはlistで保持する
     case get(?PDIC_KEY_NAME) of
         undefined ->
             %% nothing to do .
-            {undefined, Response};
-        LatestKey ->
+            {undefined, list_to_binary(ListedResponse)};
+        ListedLatestKey ->
             %% KV確定
-            KvPair = {LatestKey, Response},
+            KvPair = {ListedLatestKey, ListedResponse},
             %% store KV pair into ETS.
             ets:insert(?TBLNAME, KvPair),
             %% erase LatestKey from temporary store
             erase(?PDIC_KEY_NAME),
             %% return result.
-            KvPair
+            {list_to_binary(ListedLatestKey), list_to_binary(ListedResponse)}
     end.
 
