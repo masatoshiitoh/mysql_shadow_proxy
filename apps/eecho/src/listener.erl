@@ -119,7 +119,7 @@ process_response(D) ->
 
 process_request(D) ->
     {HeaderBin, BodyBin} = split_binary(D, 4),
-    case is_modify_operator(BodyBin) of
+    case query_classifier:is_modify_operator(BodyBin) of
         true ->
             io:format("Header ~w ~n", [HeaderBin]),
             io:format("[STORE]MODIFIER! Payload ~s ~n", [BodyBin]),
@@ -129,31 +129,4 @@ process_request(D) ->
             io:format("Header ~w ~n", [HeaderBin]),
             io:format("Payload ~s ~n", [BodyBin]),
             D
-    end.
-
-is_modify_operator(D) ->
-    is_modify_operator(D, ["INSERT ", "UPDATE ", "DELETE "]).
-
-is_modify_operator(_D, []) ->
-    false;
-is_modify_operator(D, Ops) ->
-    [Ope | T] = Ops,
-    case find_operator(D, Ope) of
-        false -> is_modify_operator(D, T);
-        _ELSE -> true
-    end.
-
-%%
-%% 全
-%%
-find_operator(D, Ope) ->
-    UpperOpe = list_to_binary(string:uppercase(Ope)),
-    LowerOpe = list_to_binary(string:lowercase(Ope)),
-    case binary:match(D, UpperOpe) of
-        nomatch ->
-            %% upperope に合致しなかったら、 loweropeと比較し、nomatchじゃなければtrue
-            binary:match(D, LowerOpe) /= nomatch;
-        _ELSE ->
-            %% upperopeに合致したら true
-            true
     end.

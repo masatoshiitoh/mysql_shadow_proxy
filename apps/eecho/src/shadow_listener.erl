@@ -82,8 +82,19 @@ loop(CallerSocket, ClientPid) ->
         {tcp, _CallerSocket, Data} ->
             % request arrived from origin.
             % transfer request bytes to server.
-            Request = process_request(Data),
-            socket_client:send(ClientPid, Request),
+            RequestX = process_request(Data),
+            case RequestX of
+                {passthru, Request} ->
+                    io:format("PassThru [~w]~n", [Request]),
+                    socket_client:send(ClientPid, Request);
+                {replynow, undefined} ->
+                    io:format("ReplyNow not found~n", []),
+                    self() ! {tcp, _CallerSocket, Data};
+                {replynow, Reply} ->
+                    io:format("ReplyNow [~w]~n", [Reply]),
+                    gen_tcp:send(CallerSocket, Reply)
+            end,
+
             loop(CallerSocket, ClientPid);
         % Caller <- Me <- Server
         {received, Data} ->
@@ -107,33 +118,63 @@ loop(CallerSocket, ClientPid) ->
 
 process_request(D) ->
     {HeaderBin, BodyBin} = split_binary(D, 4),
-    case BodyBin of
-        <<>> ->
-            D;
-        _ELSE ->
-            {ComId, PayloadBody} = split_binary(BodyBin, 1),
-            case ComId of
-                % COM_INIT_DB
-                <<2>> ->
-                    io:format("REQ Header ~w ~n", [HeaderBin]),
-                    io:format("REQ COM_INIT_DB ~n", []),
-                    io:format("REQ Payload ~s ~n", [PayloadBody]),
-                    D;
-                % COM_QUERY
-                <<3>> ->
-                    io:format("REQ Header ~w ~n", [HeaderBin]),
-                    io:format("REQ COM_QUERY ~n", []),
-                    io:format("REQ Payload ~s ~n", [PayloadBody]),
-                    io:format("REQ Payload ~w ~n", [PayloadBody]),
-                    D;
-                %OTHER
-                _Other ->
-                    io:format("REQ Full ~w ~n", [D]),
-                    io:format("REQ ComId Other ~w ~n", [_Other]),
-                    D
-            end
-    end.
+    Processed =
+        case BodyBin of
+            <<>> ->
+                D;
+            _ELSE ->
+                {ComId, PayloadBody} = split_binary(BodyBin, 1),
+                case ComId of
+                    % COM_INIT_DB
+                    <<2>> ->
+                        io:format("REQ Header ~w ~n", [HeaderBin]),
+                        io:format("REQ COM_INIT_DB ~n", []),
+                        io:format("REQ Payload ~s ~n", [PayloadBody]),
+                        {passthru, D};
+                    % COM_QUERY
+                    <<3>> ->
+                        %% modifierだったら即返答（Next Action: キャッシュを待つ）
+                        case query_classifier:is_modify_operator(PayloadBody) of
+                            true ->
+                                CachedResponse = query_cache:lookup(PayloadBody),
+                                io:format("MODIFIER_FOUND ~w ~n", [CachedResponse]),
+                                {replynow, CachedResponse};
+                            _FALSE ->
+                                io:format("REQ Header ~w ~n", [HeaderBin]),
+                                io:format("REQ COM_QUERY ~n", []),
+                                io:format("REQ Payload ~s ~n", [PayloadBody]),
+                                io:format("REQ Payload ~w ~n", [PayloadBody]),
+                                {passthru, D}
+                        end;
+                    %OTHER
+                    _Other ->
+                        io:format("REQ Full ~w ~n", [D]),
+                        io:format("REQ ComId Other ~w ~n", [_Other]),
+                        {passthru, D}
+                end
+        end,
+    query_cache:store_key(BodyBin),
+    Processed.
 
 process_response(D) ->
     io:format("RESP Payload ~w ~n", [D]),
     D.
+
+%%
+%% あーーー　レスポンスを返す場所、通常とシャドウで違うんだ。
+%% 通常は、サーバーからの返却イベントでCallerSocketに書き込むが、
+%% シャドウは、モディファイアのときだけサーバーに投げず
+%% （なので、応答パケットも来ないのでprocess_responseがキックされない）
+%% キャッシュに入るのを待って、それをCallerSocketに書き込むんだ。
+%%
+%% だから、process_requestがもっとややこしくなるんだ。
+%% (通常側はprocess_requestとprocess_responseが両方ややこしくなった)
+%%
+%% 作る前にイメージ固めておけよ感があるけど、まあ、間に合ったってことで。
+%%
+%% そして、プリペアードステートメントでうまくいかないパターンは、ProxySQLと同様、こいつでも
+%% 起きそうだな...
+%%
+%%
+%% あ。プロセス辞書が、spawnして参照できてないのでは？？？　あああ。。。
+%%

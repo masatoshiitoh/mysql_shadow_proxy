@@ -1,4 +1,47 @@
 -module(query_cache).
+-behaviour(gen_server).
+
+%% API
+-export([start/1, stop/1, start_link/1]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-record(state, {dummy}).
+start(Name) ->
+    _sup:start_child(Name).
+
+stop(Name) ->
+    gen_server:call(Name, stop).
+
+start_link(Name) ->
+    gen_server:start_link({local, Name}, ?MODULE, [], []).
+
+init(_Args) ->
+    {ok, #state{dummy=1}}.
+
+handle_call(stop, _From, State) ->
+    {stop, normal, stopped, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, ok, State}.
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+lookup()
+
+store_key()
+
+store_value()
+
+
 
 -export([start_link/0]).
 -export([stop/1]).
@@ -7,6 +50,7 @@
 -export([store_value/1]).
 
 -export([lookup/1]).
+-export([initialize_kvs/0]).
 
 -define(TBLNAME, cache).
 -define(PDIC_KEY_NAME, tmp_key).
@@ -24,46 +68,46 @@
 %% 過去に保管してあったけど新しいキーが来た→キーは上書き、古いのは忘れる（対応するバリューが来なかったんだから仕方ない）
 %% 保管したキーで検索→バリューを返す
 %% 未保管のキーで検索→undefinedを返す
-
+%%
 %% ETS内はすべてlistで保存されている。バイナリは引数でもらったら全部入り口でlist化する
+%%
 
 start_link() ->
-    ?TBLNAME = ets:new(?TBLNAME, [set, named_table]),
-    io:format("query_cache:start_link called~n", []),
-    {ok, self()}.
+    Pid = spawn(?MODULE, initialize_kvs, []),
+    register(cache, Pid),
+    {ok, Pid}.
+
+initialize_kvs() ->
+    KVS = erase(),
+    io:format("query_cache:initialize_kvs called. existing process dict. is ~w~n", [KVS]).
 
 stop(_) ->
     io:format("query_cache:stop called~n", []),
-    ets:delete(?TBLNAME).
+    ok.
 
 lookup(BinQuery) when is_binary(BinQuery)->
-    ListedQuery = binary_to_list(BinQuery),
-    case ets:lookup(?TBLNAME, ListedQuery) of
-        [] ->
+    case get(BinQuery) of
+        undefined ->
             undefined;
-        [{ListedQuery, ListedValue}] ->
-            list_to_binary(ListedValue)
+        BinValue ->
+            BinValue
     end.
 
 store_key(BinQuery) when is_binary(BinQuery) ->
-    ListedQuery = binary_to_list(BinQuery),
-    put(?PDIC_KEY_NAME, ListedQuery).
+    put(?PDIC_KEY_NAME, BinQuery).
 
 store_value(BinResponse) when is_binary(BinResponse) ->
-    ListedResponse = binary_to_list(BinResponse),
     %% process dictはlistで保持する
     case get(?PDIC_KEY_NAME) of
         undefined ->
             %% nothing to do .
-            {undefined, list_to_binary(ListedResponse)};
-        ListedLatestKey ->
-            %% KV確定
-            KvPair = {ListedLatestKey, ListedResponse},
+            {undefined, BinResponse};
+        BinLatestKey ->
             %% store KV pair into ETS.
-            ets:insert(?TBLNAME, KvPair),
+            put(BinLatestKey, BinResponse),
             %% erase LatestKey from temporary store
             erase(?PDIC_KEY_NAME),
             %% return result.
-            {list_to_binary(ListedLatestKey), list_to_binary(ListedResponse)}
+            {BinLatestKey, BinResponse}
     end.
 
