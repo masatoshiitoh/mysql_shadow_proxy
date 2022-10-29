@@ -2,58 +2,79 @@
 -behaviour(gen_server).
 
 %% API
--export([start/1, stop/1, start_link/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--record(state, {dummy}).
-start(Name) ->
-    _sup:start_child(Name).
-
-stop(Name) ->
-    gen_server:call(Name, stop).
-
-start_link(Name) ->
-    gen_server:start_link({local, Name}, ?MODULE, [], []).
-
-init(_Args) ->
-    {ok, #state{dummy=1}}.
-
-handle_call(stop, _From, State) ->
-    {stop, normal, stopped, State};
-
-handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-lookup()
-
-store_key()
-
-store_value()
-
-
+%% ここの記載を参考に。
+%% https://stacktrace.hatenablog.jp/entry/2019/11/05/190000
+%% http://erlang.shibu.jp/design_principles/gen_server.html
 
 -export([start_link/0]).
--export([stop/1]).
+-export([init/1, handle_call/3, handle_cast/2]).
+-export([terminate/2]).
 
+-export([stop/1]).
+-export([append/2]).
+
+-export([initialize_kvs/0]).
+-export([lookup/1]).
 -export([store_key/1]).
 -export([store_value/1]).
 
--export([lookup/1]).
--export([initialize_kvs/0]).
-
 -define(TBLNAME, cache).
 -define(PDIC_KEY_NAME, tmp_key).
+
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+init(_Args) ->
+    {ok, dict:new()}.
+
+terminate(Reason, State) -> ok.
+
+handle_call({store_key, BinQuery}, _From, Dict) ->
+    Result = put(?PDIC_KEY_NAME, BinQuery),
+    {reply, Result, Dict};
+handle_call({store_value, BinResponse}, _From, Dict) ->
+    case get(?PDIC_KEY_NAME) of
+        undefined ->
+            %% nothing to do .
+            {reply, {undefined, BinResponse}, Dict};
+        BinLatestKey ->
+            %% store KV pair into Dict.
+            NewDict = dict:append(BinLatestKey, BinResponse, Dict),
+            %% erase LatestKey from temporary store
+            erase(?PDIC_KEY_NAME),
+            %% return result.
+            io:format("query_cache: stored pair ~w~n", [{BinLatestKey, BinResponse}]),
+            {reply, {BinLatestKey, BinResponse}, NewDict}
+    end;
+handle_call({find, Key}, _From, Dict) ->
+    %% TODO: 見つけたキーについては消す処理を追加する
+    io:format("query_cache: find request ~w~n", [{find, Key}]),
+    case dict:find(Key, Dict) of
+        error ->
+            {reply, undefined, Dict};
+        {ok, Value} ->
+            [H | _T] = Value,
+            {reply, H, Dict}
+    end.
+
+handle_cast({append, Key, Value}, Dict) ->
+    NewDict = dict:append(Key, Value, Dict),
+    {noreply, NewDict};
+handle_cast(initialize_kvs, _Dict) ->
+    erase(?PDIC_KEY_NAME),
+    NewDict = dict:new(),
+    {noreply, NewDict}.
+
+append(Key, Value) -> gen_server:cast(?MODULE, {append, Key, Value}).
+
+store_key(BinQuery) -> gen_server:call(?MODULE, {store_key, BinQuery}).
+
+store_value(BinResponse) -> gen_server:call(?MODULE, {store_value, BinResponse}).
+
+lookup(Key) -> gen_server:call(?MODULE, {find, Key}).
+
+initialize_kvs() -> gen_server:cast(?MODULE, initialize_kvs).
+stop(_X) -> gen_server:stop(?MODULE).
 
 %%
 %% キー（クエリ）が届く：store_keyが呼ばれる
@@ -71,43 +92,3 @@ store_value()
 %%
 %% ETS内はすべてlistで保存されている。バイナリは引数でもらったら全部入り口でlist化する
 %%
-
-start_link() ->
-    Pid = spawn(?MODULE, initialize_kvs, []),
-    register(cache, Pid),
-    {ok, Pid}.
-
-initialize_kvs() ->
-    KVS = erase(),
-    io:format("query_cache:initialize_kvs called. existing process dict. is ~w~n", [KVS]).
-
-stop(_) ->
-    io:format("query_cache:stop called~n", []),
-    ok.
-
-lookup(BinQuery) when is_binary(BinQuery)->
-    case get(BinQuery) of
-        undefined ->
-            undefined;
-        BinValue ->
-            BinValue
-    end.
-
-store_key(BinQuery) when is_binary(BinQuery) ->
-    put(?PDIC_KEY_NAME, BinQuery).
-
-store_value(BinResponse) when is_binary(BinResponse) ->
-    %% process dictはlistで保持する
-    case get(?PDIC_KEY_NAME) of
-        undefined ->
-            %% nothing to do .
-            {undefined, BinResponse};
-        BinLatestKey ->
-            %% store KV pair into ETS.
-            put(BinLatestKey, BinResponse),
-            %% erase LatestKey from temporary store
-            erase(?PDIC_KEY_NAME),
-            %% return result.
-            {BinLatestKey, BinResponse}
-    end.
-

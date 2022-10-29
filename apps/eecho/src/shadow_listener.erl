@@ -86,16 +86,17 @@ loop(CallerSocket, ClientPid) ->
             case RequestX of
                 {passthru, Request} ->
                     io:format("PassThru [~w]~n", [Request]),
-                    socket_client:send(ClientPid, Request);
+                    socket_client:send(ClientPid, Request),
+                    loop(CallerSocket, ClientPid);
                 {replynow, undefined} ->
-                    io:format("ReplyNow not found~n", []),
-                    self() ! {tcp, _CallerSocket, Data};
+                    io:format("ReplyNow not found... Kill Session~n", []),
+                    gen_tcp:close(CallerSocket);
+                %% self() ! {tcp, _CallerSocket, Data};
                 {replynow, Reply} ->
                     io:format("ReplyNow [~w]~n", [Reply]),
-                    gen_tcp:send(CallerSocket, Reply)
-            end,
-
-            loop(CallerSocket, ClientPid);
+                    gen_tcp:send(CallerSocket, Reply),
+                    loop(CallerSocket, ClientPid)
+            end;
         % Caller <- Me <- Server
         {received, Data} ->
             % response arrived from server
@@ -117,7 +118,7 @@ loop(CallerSocket, ClientPid) ->
     end.
 
 process_request(D) ->
-    {HeaderBin, BodyBin} = split_binary(D, 4),
+    {_HeaderBin, BodyBin} = split_binary(D, 4),
     Processed =
         case BodyBin of
             <<>> ->
@@ -127,9 +128,9 @@ process_request(D) ->
                 case ComId of
                     % COM_INIT_DB
                     <<2>> ->
-                        io:format("REQ Header ~w ~n", [HeaderBin]),
-                        io:format("REQ COM_INIT_DB ~n", []),
-                        io:format("REQ Payload ~s ~n", [PayloadBody]),
+                        %%io:format("REQ Header ~w ~n", [HeaderBin]),
+                        %%io:format("REQ COM_INIT_DB ~n", []),
+                        %%io:format("REQ Payload ~s ~n", [PayloadBody]),
                         {passthru, D};
                     % COM_QUERY
                     <<3>> ->
@@ -140,16 +141,16 @@ process_request(D) ->
                                 io:format("MODIFIER_FOUND ~w ~n", [CachedResponse]),
                                 {replynow, CachedResponse};
                             _FALSE ->
-                                io:format("REQ Header ~w ~n", [HeaderBin]),
-                                io:format("REQ COM_QUERY ~n", []),
-                                io:format("REQ Payload ~s ~n", [PayloadBody]),
-                                io:format("REQ Payload ~w ~n", [PayloadBody]),
+                                %%io:format("REQ Header ~w ~n", [HeaderBin]),
+                                %%io:format("REQ COM_QUERY ~n", []),
+                                %%io:format("REQ Payload ~s ~n", [PayloadBody]),
+                                %%io:format("REQ Payload ~w ~n", [PayloadBody]),
                                 {passthru, D}
                         end;
                     %OTHER
                     _Other ->
-                        io:format("REQ Full ~w ~n", [D]),
-                        io:format("REQ ComId Other ~w ~n", [_Other]),
+                        %%io:format("REQ Full ~w ~n", [D]),
+                        %%io:format("REQ ComId Other ~w ~n", [_Other]),
                         {passthru, D}
                 end
         end,

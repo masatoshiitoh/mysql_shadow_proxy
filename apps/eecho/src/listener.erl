@@ -77,7 +77,7 @@ server(LS) ->
 
 loop(CallerSocket, ClientPid) ->
     inet:setopts(CallerSocket, [{active, once}]),
-    io:format("Loop! Socket [~w]~n", [CallerSocket]),
+    %%io:format("Loop! Socket [~w]~n", [CallerSocket]),
 
     receive
         % Caller -> Me -> Server
@@ -111,22 +111,40 @@ process_response(D) ->
     StoreResult = query_cache:store_value(D),
     case StoreResult of
         {undefined, _X} ->
-            io:format("RESP Payload ~w ~n", [D]);
-        StoreSucceeded ->
-            io:format("[STORE]RESP Payload ~w ~n", [StoreSucceeded])
-    end,
-    D.
-
-process_request(D) ->
-    {HeaderBin, BodyBin} = split_binary(D, 4),
-    case query_classifier:is_modify_operator(BodyBin) of
-        true ->
-            io:format("Header ~w ~n", [HeaderBin]),
-            io:format("[STORE]MODIFIER! Payload ~s ~n", [BodyBin]),
-            query_cache:store_key(BodyBin),
+            %%io:format("RESP Payload ~w ~n", [D]),
             D;
-        false ->
-            io:format("Header ~w ~n", [HeaderBin]),
-            io:format("Payload ~s ~n", [BodyBin]),
+        _StoreSucceeded ->
+            %%io:format("[STORE]RESP Payload ~w ~n", [StoreSucceeded])
             D
     end.
+
+process_request(D) ->
+    {_HeaderBin, BodyBin} = split_binary(D, 4),
+    Processed =
+        case BodyBin of
+            <<>> ->
+                D;
+            _ELSE ->
+                {ComId, PayloadBody} = split_binary(BodyBin, 1),
+                case ComId of
+                    % COM_INIT_DB
+                    <<2>> ->
+                        D;
+                    % COM_QUERY
+                    <<3>> ->
+                        case query_classifier:is_modify_operator(PayloadBody) of
+                            true ->
+                                %%io:format("Header ~w ~n", [HeaderBin]),
+                                %%io:format("[STORE]MODIFIER! Payload ~s ~n", [BodyBin]),
+                                query_cache:store_key(PayloadBody),
+                                D;
+                            false ->
+                                %%io:format("Header ~w ~n", [HeaderBin]),
+                                %%io:format("Payload ~s ~n", [BodyBin]),
+                                D
+                        end;
+                    _OTHER ->
+                        D
+                end
+        end,
+    Processed.

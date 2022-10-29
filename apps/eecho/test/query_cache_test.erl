@@ -37,6 +37,7 @@ store_value2_test() ->
     _R1 = query_cache:store_value(<<10,10,10,10>>),
     Result = query_cache:lookup(<<1,2,3,4>>),
     query_cache:stop(1),
+    io:format("ShowResult ~w~n", [Result]),
     ?assert(Result == <<10,10,10,10>>).
 
 %% キーが上書きされてしまったあとのバリュー保管、という場合のlookup動作（キーがなくてundefinedを返す）
