@@ -47,14 +47,16 @@ handle_call({store_value, BinResponse}, _From, Dict) ->
             {reply, {BinLatestKey, BinResponse}, NewDict}
     end;
 handle_call({find, Key}, _From, Dict) ->
-    %% TODO: 見つけたキーについては消す処理を追加する
-    io:format("query_cache: find request ~w~n", [{find, Key}]),
     case dict:find(Key, Dict) of
         error ->
+            io:format("query_cache: NOT FOUND: find request ~w~n", [{find, Key}]),
             {reply, undefined, Dict};
         {ok, Value} ->
+            io:format("query_cache: FOUND: find request ~w~n", [{find, Key}]),
+            %% 見つけたキーは消す
+            NewDict = dict:erase(Key, Dict),
             [H | _T] = Value,
-            {reply, H, Dict}
+            {reply, H, NewDict}
     end.
 
 handle_cast({append, Key, Value}, Dict) ->
@@ -74,6 +76,7 @@ store_value(BinResponse) -> gen_server:call(?MODULE, {store_value, BinResponse})
 lookup(Key) -> gen_server:call(?MODULE, {find, Key}).
 
 initialize_kvs() -> gen_server:cast(?MODULE, initialize_kvs).
+
 stop(_X) -> gen_server:stop(?MODULE).
 
 %%

@@ -19,7 +19,7 @@ stop(_) ->
     ok.
 
 start_link() ->
-    start_link(5, 10002).
+    start_link(1, 10002).
 
 start_link(Num, LPort) ->
     %%ets:new(childprocs, [bag, named_table]),
@@ -46,7 +46,7 @@ start_servers(Num, LS) ->
 
     ets:insert(childprocs, {pid, ServerPid}),
     ServerPids = ets:lookup(childprocs, pid),
-    io:format("Pids: [~w]~n", [ServerPids]),
+    %% io:format("Pids: [~w]~n", [ServerPids]),
 
     start_servers(Num - 1, LS).
 
@@ -75,7 +75,7 @@ server(LS) ->
 
 loop(CallerSocket, ClientPid) ->
     inet:setopts(CallerSocket, [{active, once}]),
-    io:format("Loop! Socket [~w]~n", [CallerSocket]),
+    %% io:format("Loop! Socket [~w]~n", [CallerSocket]),
 
     receive
         % Caller -> Me -> Server
@@ -85,7 +85,7 @@ loop(CallerSocket, ClientPid) ->
             RequestX = process_request(Data),
             case RequestX of
                 {passthru, Request} ->
-                    io:format("PassThru [~w]~n", [Request]),
+                    %% io:format("PassThru [~w]~n", [Request]),
                     socket_client:send(ClientPid, Request),
                     loop(CallerSocket, ClientPid);
                 {replynow, undefined} ->
@@ -93,7 +93,7 @@ loop(CallerSocket, ClientPid) ->
                     gen_tcp:close(CallerSocket);
                 %% self() ! {tcp, _CallerSocket, Data};
                 {replynow, Reply} ->
-                    io:format("ReplyNow [~w]~n", [Reply]),
+                    %% io:format("ReplyNow [~w]~n", [Reply]),
                     gen_tcp:send(CallerSocket, Reply),
                     loop(CallerSocket, ClientPid)
             end;
@@ -117,6 +117,20 @@ loop(CallerSocket, ClientPid) ->
             ok
     end.
 
+process_modifier_query(PayloadBody, 0) ->
+    {replynow, undefined};
+process_modifier_query(PayloadBody, NumTries) ->
+    case query_cache:lookup(PayloadBody) of
+        undefined ->
+            %% sleep 1 sec.
+            timer:sleep(1000),
+            %% retry.
+            process_modifier_query(PayloadBody, NumTries - 1);
+        CachedResponse ->
+            %% io:format("MODIFIER_FOUND ~w ~n", [CachedResponse]),
+            {replynow, CachedResponse}
+    end.
+
 process_request(D) ->
     {_HeaderBin, BodyBin} = split_binary(D, 4),
     Processed =
@@ -137,9 +151,7 @@ process_request(D) ->
                         %% modifierだったら即返答（Next Action: キャッシュを待つ）
                         case query_classifier:is_modify_operator(PayloadBody) of
                             true ->
-                                CachedResponse = query_cache:lookup(PayloadBody),
-                                io:format("MODIFIER_FOUND ~w ~n", [CachedResponse]),
-                                {replynow, CachedResponse};
+                                process_modifier_query(PayloadBody, 5);
                             _FALSE ->
                                 %%io:format("REQ Header ~w ~n", [HeaderBin]),
                                 %%io:format("REQ COM_QUERY ~n", []),
@@ -158,7 +170,7 @@ process_request(D) ->
     Processed.
 
 process_response(D) ->
-    io:format("RESP Payload ~w ~n", [D]),
+    %% io:format("RESP Payload ~w ~n", [D]),
     D.
 
 %%

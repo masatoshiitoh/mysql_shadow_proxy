@@ -21,7 +21,7 @@ stop(_) ->
     stop_children(ServerPids).
 
 start_link() ->
-    start_link(5, 10001).
+    start_link(1, 10001).
 
 start_link(Num, LPort) ->
     ets:new(childprocs, [bag, named_table]),
@@ -48,7 +48,7 @@ start_servers(Num, LS) ->
 
     ets:insert(childprocs, {pid, ServerPid}),
     ServerPids = ets:lookup(childprocs, pid),
-    io:format("Pids: [~w]~n", [ServerPids]),
+    %% io:format("Pids: [~w]~n", [ServerPids]),
 
     start_servers(Num - 1, LS).
 
